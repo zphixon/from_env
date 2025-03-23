@@ -1,0 +1,13 @@
+[package]
+name = "from_env"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.219", features = ["derive"] }
+macros = { path = "macros" }
+
+[dev-dependencies]
+toml = "*"
+serde_json = "*"
+url = { version = "*", features = ["serde"] }
