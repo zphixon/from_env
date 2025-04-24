@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 serde = { version = "1.0.219", features = ["derive"] }
 macros = { path = "macros" }
+thiserror = "2.0.12"
 
 [dev-dependencies]
 toml = "*"

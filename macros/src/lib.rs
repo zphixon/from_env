@@ -109,10 +109,11 @@ impl ConfigOption {
             ConfigValue::Leaf(leaf) => quote! {
                 match std::env::var(#name) {
                     Ok(value) => {
-                        use std::str::FromStr;
-                        self.#field = <#leaf>::from_str(value.as_str()).expect(
-                            concat!("invalid value for ", #name)
-                        );
+                        use serde::Deserialize;
+                        // idk how to indent this
+                        self.#field = <#leaf>::deserialize(de::StringDeserializer {
+                            input: value.as_str()
+                        }).expect(concat!("invalid value for ", #name));
                     }
                     _ => {}
                 }
@@ -180,6 +181,342 @@ pub fn config(tokens: TokenStream) -> TokenStream {
         }
 
         #(#types)*
+
+        mod de {
+            use serde::{de::{IntoDeserializer, Visitor},};
+
+            #[derive(Debug, thiserror::Error)]
+            pub(super) enum StringDeserializerError<'de> {
+                #[error("Custom error: {0}")]
+                Custom(String),
+
+                #[error("Could not parse bool: {0}")]
+                ParseBool(#[from] std::str::ParseBoolError),
+
+                #[error("Could not parse int: {0}")]
+                ParseInt(#[from] std::num::ParseIntError),
+
+                #[error("Could not parse float: {0}")]
+                ParseFloat(#[from] std::num::ParseFloatError),
+
+                #[error("Cannot deseralize {0}")]
+                CannotDeserialize(&'static str),
+
+                #[error("Zero or more than one char: {0:?}")]
+                NotChar(&'de str),
+
+                #[error("Not unit struct {0}: {1:?}")]
+                NotUnit(&'static str, &'de str),
+
+                #[error("Enum variant does not exist: {0:?}")]
+                NoSuchVariant(&'de str),
+
+                #[error("The string deserializer is not self-describing")]
+                NotSelfDescribing,
+            }
+
+            impl<'de> serde::de::Error for StringDeserializerError<'de> {
+                fn custom<T>(msg: T) -> Self
+                where
+                    T: std::fmt::Display,
+                {
+                    StringDeserializerError::Custom(msg.to_string())
+                }
+            }
+
+            #[derive(Clone, Copy)]
+            pub(super) struct StringDeserializer<'de> {
+                pub(super) input: &'de str,
+            }
+
+            impl<'de> serde::de::Deserializer<'de> for StringDeserializer<'de> {
+                type Error = StringDeserializerError<'de>;
+
+                fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    Err(StringDeserializerError::NotSelfDescribing)
+                }
+
+                fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_bool(self.input.parse()?)
+                }
+
+                fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_i8(self.input.parse()?)
+                }
+
+                fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_i16(self.input.parse()?)
+                }
+
+                fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_i32(self.input.parse()?)
+                }
+
+                fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_i64(self.input.parse()?)
+                }
+
+                fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_u8(self.input.parse()?)
+                }
+
+                fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_u16(self.input.parse()?)
+                }
+
+                fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_u32(self.input.parse()?)
+                }
+
+                fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_u64(self.input.parse()?)
+                }
+
+                fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_f32(self.input.parse()?)
+                }
+
+                fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_f64(self.input.parse()?)
+                }
+
+                fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    if self.input.len() != 1 {
+                        return Err(StringDeserializerError::NotChar(self.input));
+                    }
+                    visitor.visit_char(self.input.chars().nth(0).unwrap())
+                }
+
+                fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_str(self.input)
+                }
+
+                fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_string(String::from(self.input))
+                }
+
+                fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_bytes(self.input.as_bytes())
+                }
+
+                fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_byte_buf(self.input.as_bytes().to_owned())
+                }
+
+                fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    if self.input == "" {
+                        visitor.visit_none()
+                    } else {
+                        visitor.visit_some(self)
+                    }
+                }
+
+                fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    self.deserialize_unit_struct("", visitor)
+                }
+
+                fn deserialize_unit_struct<V>(
+                    self,
+                    name: &'static str,
+                    visitor: V,
+                ) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    if self.input == name {
+                        visitor.visit_unit()
+                    } else {
+                        Err(StringDeserializerError::NotUnit(name, self.input))
+                    }
+                }
+
+                fn deserialize_newtype_struct<V>(
+                    self,
+                    _name: &'static str,
+                    visitor: V,
+                ) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_newtype_struct(self)
+                }
+
+                fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_seq(CommaSeparated::new(self))
+                }
+
+                fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_seq(CommaSeparated::new(self))
+                }
+
+                fn deserialize_tuple_struct<V>(
+                    self,
+                    _name: &'static str,
+                    _len: usize,
+                    visitor: V,
+                ) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    visitor.visit_seq(CommaSeparated::new(self))
+                }
+
+                fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    Err(StringDeserializerError::CannotDeserialize("maps"))
+                }
+
+                fn deserialize_struct<V>(
+                    self,
+                    _name: &'static str,
+                    _fields: &'static [&'static str],
+                    _visitor: V,
+                ) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    Err(StringDeserializerError::CannotDeserialize("structs"))
+                }
+
+                fn deserialize_enum<V>(
+                    self,
+                    _name: &'static str,
+                    variants: &'static [&'static str],
+                    visitor: V,
+                ) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    if variants.contains(&self.input) {
+                        visitor.visit_enum(self.input.into_deserializer())
+                    } else {
+                        Err(StringDeserializerError::NoSuchVariant(self.input))
+                    }
+                }
+
+                fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    self.deserialize_str(visitor)
+                }
+
+                fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+                where
+                    V: Visitor<'de>,
+                {
+                    self.deserialize_any(visitor)
+                }
+            }
+
+            struct CommaSeparated<'de> {
+                de: StringDeserializer<'de>,
+                bytes: std::iter::Peekable<std::iter::Enumerate<std::str::Bytes<'de>>>,
+            }
+
+            impl<'de> CommaSeparated<'de> {
+                fn new(de: StringDeserializer<'de>) -> Self {
+                    CommaSeparated {
+                        bytes: de.input.bytes().enumerate().peekable(),
+                        de,
+                    }
+                }
+            }
+
+            impl<'de> serde::de::SeqAccess<'de> for CommaSeparated<'de> {
+                type Error = StringDeserializerError<'de>;
+
+                fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
+                where
+                    T: serde::de::DeserializeSeed<'de>,
+                {
+                    let Some(&(start, _)) = self.bytes.peek() else {
+                        return Ok(None);
+                    };
+                    while {
+                        if let Some((_, byte)) = self.bytes.next() {
+                            byte != b','
+                        } else {
+                            false
+                        }
+                    } {}
+                    let end = match self.bytes.peek() {
+                        Some(&(end, _)) => end - 1,
+                        None => self.de.input.len(),
+                    };
+
+                    seed.deserialize(StringDeserializer {
+                        input: &self.de.input[start..end],
+                    })
+                    .map(Some)
+                }
+            }
+        }
 
         impl Config {
             fn hydrate_from_env(&mut self) {
