@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, ToTokens};
-use syn::{parse::Parse, punctuated::Punctuated, Ident, LitStr, Token, Type};
+use syn::{parse::Parse, punctuated::Punctuated, Attribute, Ident, LitStr, Meta, Token, Type};
 
 #[derive(Clone)]
 enum ConfigValue {
@@ -11,12 +11,40 @@ enum ConfigValue {
 
 #[derive(Clone)]
 struct ConfigOption {
+    attrs: Option<Vec<Attribute>>,
+    is_default: bool,
     name: Ident,
     value: Box<ConfigValue>,
 }
 
 impl Parse for ConfigOption {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let lookahead = input.lookahead1();
+        let attrs = if lookahead.peek(Token![#]) {
+            Some(Attribute::parse_outer(input)?)
+        } else {
+            None
+        };
+
+        // check if #[derive(Default)]
+        let derive_path: syn::Path = syn::parse_quote! { derive };
+        let default_path: syn::Path = syn::parse_quote! { Default };
+        let is_default = if let Some(attrs) = attrs.as_ref() {
+            attrs.iter().any(|attr| match &attr.meta {
+                Meta::List(meta_list) if meta_list.path == derive_path => {
+                    let derived_traits = meta_list
+                        .parse_args_with(Punctuated::<syn::Path, Token![,]>::parse_terminated)
+                        .unwrap();
+                    derived_traits
+                        .iter()
+                        .any(|derived_trait| derived_trait == &default_path)
+                }
+                _ => false,
+            })
+        } else {
+            false
+        };
+
         let name: Ident = input.parse()?;
 
         let lookahead = input.lookahead1();
@@ -35,7 +63,12 @@ impl Parse for ConfigOption {
             ConfigValue::Table(options)
         });
 
-        Ok(ConfigOption { name, value })
+        Ok(ConfigOption {
+            attrs,
+            is_default,
+            name,
+            value,
+        })
     }
 }
 
@@ -53,11 +86,22 @@ impl ConfigOption {
     fn as_struct_field(&self) -> TokenStream2 {
         let name = self.name.clone();
         let newtypename = self.type_name();
+
+        let attrs = self.attrs.clone().unwrap_or_default();
+        let serde_default = if self.is_default {
+            quote! { #[serde(default)] }
+        } else {
+            quote! {}
+        };
+
         match &*self.value {
             ConfigValue::Leaf(type_) => quote! {
-                #name : #type_ ,
+                #(#attrs)*
+                #serde_default
+                #name : #type_,
             },
             ConfigValue::Table(_) => quote! {
+                #serde_default
                 #name : #newtypename,
             },
         }
@@ -85,9 +129,12 @@ impl ConfigOption {
                     .map(|child| child.as_type(new_parent.clone()))
                     .collect::<Vec<_>>();
 
+                let attrs = self.attrs.clone().unwrap_or_default();
+
                 quote! {
                     #[derive(serde::Deserialize, Debug)]
                     #[allow(non_camel_case_types)]
+                    #(#attrs)*
                     struct #newtypename {
                         #(#fields)*
                     }
@@ -144,7 +191,8 @@ impl Parse for ConfigCall {
         let _: Token![,] = input.parse()?;
         Ok(ConfigCall {
             project_name: project_name.value(),
-            options: Punctuated::<ConfigOption, Token![,]>::parse_separated_nonempty(input)?
+            options: input
+                .parse_terminated(ConfigOption::parse, Token![,])?
                 .iter()
                 .cloned()
                 .collect(),
@@ -181,6 +229,12 @@ pub fn config(tokens: TokenStream) -> TokenStream {
         }
 
         #(#types)*
+
+        impl Config {
+            fn hydrate_from_env(&mut self) {
+                #(#hydrate_fields)*
+            }
+        }
 
         mod de {
             use serde::{de::{IntoDeserializer, Visitor},};
@@ -515,12 +569,6 @@ pub fn config(tokens: TokenStream) -> TokenStream {
                     })
                     .map(Some)
                 }
-            }
-        }
-
-        impl Config {
-            fn hydrate_from_env(&mut self) {
-                #(#hydrate_fields)*
             }
         }
     }
