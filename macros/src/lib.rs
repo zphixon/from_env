@@ -98,11 +98,11 @@ impl ConfigOption {
             ConfigValue::Leaf(type_) => quote! {
                 #(#attrs)*
                 #serde_default
-                #name : #type_,
+                pub #name : #type_,
             },
             ConfigValue::Table(_) => quote! {
                 #serde_default
-                #name : #newtypename,
+                pub #name : #newtypename,
             },
         }
     }
@@ -135,12 +135,12 @@ impl ConfigOption {
                     #[derive(serde::Deserialize, Debug)]
                     #[allow(non_camel_case_types)]
                     #(#attrs)*
-                    struct #newtypename {
+                    pub struct #newtypename {
                         #(#fields)*
                     }
                     #(#types)*
                     impl #newtypename {
-                        fn hydrate_from_env(&mut self) {
+                        pub fn hydrate_from_env(&mut self) {
                             #(#hydrate_fields)*
                         }
                     }
@@ -224,14 +224,14 @@ pub fn config(tokens: TokenStream) -> TokenStream {
 
     quote! {
         #[derive(serde::Deserialize, Debug)]
-        struct Config {
+        pub struct Config {
             #(#fields)*
         }
 
         #(#types)*
 
         impl Config {
-            fn hydrate_from_env(&mut self) {
+            pub fn hydrate_from_env(&mut self) {
                 #(#hydrate_fields)*
             }
         }
